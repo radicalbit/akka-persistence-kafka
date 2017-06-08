@@ -54,9 +54,9 @@ object KafkaLoadSpec {
 
     def receiveCommand: Receive = {
       case c @ "start" =>
-        defer(c) { _ => startMeasure(); sender ! "started" }
+        deferAsync(c) { _ => startMeasure(); sender ! "started" }
       case c @ "stop" =>
-        defer(c) { _ => stopMeasure() }
+        deferAsync(c) { _ => stopMeasure() }
       case payload: String =>
         persistAsync(payload)(handle)
     }
@@ -77,7 +77,7 @@ class KafkaLoadSpec extends TestKit(ActorSystem("test", KafkaLoadSpec.config)) w
 
   override def afterAll(): Unit = {
     server.stop()
-    system.shutdown()
+    system.terminate()
     super.afterAll()
   }
 

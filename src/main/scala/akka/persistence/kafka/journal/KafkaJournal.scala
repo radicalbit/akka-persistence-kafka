@@ -1,8 +1,11 @@
 package akka.persistence.kafka.journal
 
-import scala.collection.immutable.Seq
+import akka.persistence.AtomicWrite
 
-import akka.persistence.{PersistentId, PersistentConfirmation}
+import scala.collection.immutable.Seq
+import scala.concurrent.{ExecutionContext, Promise}
+import scala.util.Try
+
 import akka.persistence.journal.AsyncWriteJournal
 import akka.serialization.{Serialization, SerializationExtension}
 
@@ -35,7 +38,7 @@ class KafkaJournal extends AsyncWriteJournal with MetadataConsumer {
     super.postStop()
   }
 
-  override def receive: Receive = localReceive.orElse(super.receive)
+  override def receivePluginInternal: Receive = localReceive
 
   private def localReceive: Receive = {
     case BrokersUpdated(newBrokers) if newBrokers != brokers =>
@@ -58,30 +61,28 @@ class KafkaJournal extends AsyncWriteJournal with MetadataConsumer {
   // Transient deletions only to pass TCK (persistent not supported)
   var deletions: Deletions = Map.empty
 
-  def asyncWriteMessages(messages: Seq[PersistentRepr]): Future[Unit] = {
-    val sends = messages.groupBy(_.persistenceId).map {
-      case (pid, msgs) => writerFor(pid).ask(msgs)(writeTimeout)
+  private def asyncWriteMessagesLegacy(messages: Seq[PersistentRepr]): Future[Seq[Try[Unit]]] = {
+    implicit class RichFuture[T](future: Future[T]) {
+      def lift(implicit executor: ExecutionContext): Future[Try[T]] = {
+        val promise = Promise[Try[T]]()
+        future.onComplete(promise.success)
+        promise.future
+      }
     }
-    Future.sequence(sends).map(_ => ())
+    // TODO: don't preserve the order of messages... we have to change KafkaJournalWriter
+    val sends = messages.groupBy(_.persistenceId).map {
+      case (pid, msgs) =>
+        val res = writerFor(pid).ask(msgs)(writeTimeout).map(_ => ())
+        List.fill(msgs.size)(res)
+    }.toList.flatten
+    Future.traverse(sends)(_.lift)
   }
 
-  def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long, permanent: Boolean): Future[Unit] =
+  private def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long, permanent: Boolean): Future[Unit] =
     Future.successful(deleteMessagesTo(persistenceId, toSequenceNr, permanent))
 
-  def asyncDeleteMessages(messageIds: Seq[PersistentId], permanent: Boolean): Future[Unit] =
-    Future.failed(new UnsupportedOperationException("Individual deletions not supported"))
-
-  def asyncWriteConfirmations(confirmations: Seq[PersistentConfirmation]): Future[Unit] =
-    Future.failed(new UnsupportedOperationException("Channels not supported"))
-
-  def deleteMessagesTo(persistenceId: String, toSequenceNr: Long, permanent: Boolean): Unit =
+  private def deleteMessagesTo(persistenceId: String, toSequenceNr: Long, permanent: Boolean): Unit =
     deletions = deletions + (persistenceId -> (toSequenceNr, permanent))
-
-  def deleteMessages(messageIds: Seq[PersistentId], permanent: Boolean): Unit =
-    throw new UnsupportedOperationException("Individual deletions not supported")
-
-  def writeConfirmations(confirmations: Seq[PersistentConfirmation]): Unit =
-    throw new UnsupportedOperationException("Channels not supported")
 
   private def writerFor(persistenceId: String): ActorRef =
     writers(math.abs(persistenceId.hashCode) % config.writeConcurrency)
@@ -94,6 +95,14 @@ class KafkaJournal extends AsyncWriteJournal with MetadataConsumer {
     KafkaJournalWriterConfig(journalProducerConfig, eventProducerConfig, config.eventTopicMapper, serialization)
   }
 
+  override def asyncWriteMessages(messages: Seq[AtomicWrite]): Future[Seq[Try[Unit]]] = {
+    // TODO : manage persistAll -> messages.payload.size > 1 -> unsupported exception
+    val reprs = messages.flatMap(_.payload)
+    asyncWriteMessagesLegacy(reprs)
+  }
+
+  override def asyncDeleteMessagesTo(persistenceId: String, toSequenceNr: Long): Future[Unit] =
+    asyncDeleteMessagesTo(persistenceId, toSequenceNr, false)
 
   // --------------------------------------------------------------------------------------
   //  Journal reads
@@ -118,7 +127,10 @@ class KafkaJournal extends AsyncWriteJournal with MetadataConsumer {
   def replayMessages(persistenceId: String, fromSequenceNr: Long, toSequenceNr: Long, max: Long, deletions: Deletions, callback: PersistentRepr => Unit): Unit = {
     val (deletedTo, permanent) = deletions.getOrElse(persistenceId, (0L, false))
 
-    val adjustedFrom = if (permanent) math.max(deletedTo + 1L, fromSequenceNr) else fromSequenceNr
+    val adjustedFromTmp = if (permanent) math.max(deletedTo + 1L, fromSequenceNr) else fromSequenceNr
+    // TODO: WORKAROUND to pass tests with fromSequenceNr = 0
+    val adjustedFrom = if (adjustedFromTmp == 0) 1 else adjustedFromTmp
+
     val adjustedNum = toSequenceNr - adjustedFrom + 1L
     val adjustedTo = if (max < adjustedNum) adjustedFrom + max - 1L else toSequenceNr
 
@@ -137,6 +149,7 @@ class KafkaJournal extends AsyncWriteJournal with MetadataConsumer {
       serialization.deserialize(MessageUtil.payloadBytes(m), classOf[PersistentRepr]).get
     }
   }
+
 }
 
 private case class KafkaJournalWriterConfig(
