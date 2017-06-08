@@ -9,20 +9,24 @@ import akka.persistence.kafka.KafkaCleanup
 import akka.persistence.kafka.server._
 import akka.testkit.TestProbe
 
-class KafkaSnapshotStoreSpec extends SnapshotStoreSpec with KafkaCleanup {
+object KafkaSnapshotStoreConfiguration {
   lazy val maxMessageSize = 1000 * 1000 * 11
-  lazy val config = ConfigFactory.parseString(
+
+  lazy val config =   ConfigFactory.parseString(
     s"""
-      |akka.persistence.journal.plugin = "kafka-journal"
-      |akka.persistence.snapshot-store.plugin = "kafka-snapshot-store"
-      |akka.test.single-expect-default = 10s
-      |kafka-snapshot-store.consumer.fetch.message.max.bytes = ${maxMessageSize}
-      |kafka-snapshot-store.ignore-orphan = false
-      |test-server.kafka.message.max.bytes = ${maxMessageSize}
-      |test-server.kafka.replica.fetch.max.bytes = ${maxMessageSize}
-      |test-server.zookeeper.dir = target/test/zookeeper
-      |test-server.kafka.log.dirs = target/test/kafka
+       |akka.persistence.journal.plugin = "kafka-journal"
+       |akka.persistence.snapshot-store.plugin = "kafka-snapshot-store"
+       |akka.test.single-expect-default = 10s
+       |kafka-snapshot-store.consumer.fetch.message.max.bytes = ${maxMessageSize}
+       |kafka-snapshot-store.ignore-orphan = false
+       |test-server.kafka.message.max.bytes = ${maxMessageSize}
+       |test-server.kafka.replica.fetch.max.bytes = ${maxMessageSize}
+       |test-server.zookeeper.dir = target/test/zookeeper
+       |test-server.kafka.log.dirs = target/test/kafka
     """.stripMargin)
+}
+
+class KafkaSnapshotStoreSpec extends SnapshotStoreSpec(KafkaSnapshotStoreConfiguration.config) with KafkaCleanup {
 
   val systemConfig = system.settings.config
   val serverConfig = new TestServerConfig(systemConfig.getConfig("test-server"))

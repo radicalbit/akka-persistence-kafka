@@ -114,7 +114,8 @@ class KafkaSnapshotStore extends KafkaSnapshotStoreEndpoint with MetadataConsume
     val singleDeletions = this.singleDeletions
     val rangeDeletions = this.rangeDeletions
     for {
-      highest <- if (config.ignoreOrphan) highestJournalSequenceNr(persistenceId) else Future.successful(Long.MaxValue)
+    // TODO: check in snapshot refactoring...
+    highest <- /*if (config.ignoreOrphan) highestJournalSequenceNr(persistenceId) else*/ Future.successful(Long.MaxValue)
       adjusted = if (config.ignoreOrphan &&
         highest < criteria.maxSequenceNr &&
         highest > 0L) criteria.copy(maxSequenceNr = highest) else criteria
@@ -149,20 +150,22 @@ class KafkaSnapshotStore extends KafkaSnapshotStoreEndpoint with MetadataConsume
   /**
    * Fetches the highest sequence number for `persistenceId` from the journal actor.
    */
-  private def highestJournalSequenceNr(persistenceId: String): Future[Long] = {
-    val journal = extension.journalFor(persistenceId)
-    val promise = Promise[Any]()
 
-    // We need to use a PromiseActorRef here instead of ask because the journal doesn't reply to ReadHighestSequenceNr requests
-    val ref = PromiseActorRef(extension.system.provider, Timeout(config.consumerConfig.socketTimeoutMs.millis), journal.toString)
-
-    journal ! ReadHighestSequenceNr(0L, persistenceId, ref)
-
-    ref.result.future.flatMap {
-      case ReadHighestSequenceNrSuccess(snr) => Future.successful(snr)
-      case ReadHighestSequenceNrFailure(err) => Future.failed(err)
-    }
-  }
+  // TODO: check in snapshot refactoring...
+//    private def highestJournalSequenceNr(persistenceId: String): Future[Long] = {
+//    val journal = extension.journalFor(persistenceId)
+//    val promise = Promise[Any]()
+//
+//    // We need to use a PromiseActorRef here instead of ask because the journal doesn't reply to ReadHighestSequenceNr requests
+//    val ref = PromiseActorRef(extension.system.provider, Timeout(config.consumerConfig.socketTimeoutMs.millis), journal.toString)
+//
+//    journal ! ReadHighestSequenceNr(0L, persistenceId, ref)
+//
+//    ref.result.future.flatMap {
+//      case ReadHighestSequenceNrSuccess(snr) => Future.successful(snr)
+//      case ReadHighestSequenceNrFailure(err) => Future.failed(err)
+//    }
+//  }
 
   private def snapshot(host: String, port: Int, topic: String, offset: Long): KafkaSnapshot = {
     val iter = new MessageIterator(host, port, topic, config.partition, offset, config.consumerConfig)

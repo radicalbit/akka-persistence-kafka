@@ -2,18 +2,16 @@ package akka.persistence.kafka.example
 
 import java.util.Properties
 
-import scala.collection.immutable.Seq
-
 import akka.actor._
-import akka.persistence.{PersistenceFailure, PersistentActor, PersistentRepr, RecoveryFailure, SaveSnapshotFailure, SaveSnapshotSuccess, SnapshotOffer}
-import akka.persistence.kafka.{EventDecoder, Event, EventTopicMapper}
-import akka.persistence.kafka.server.{TestServerConfig, TestServer}
+import akka.persistence.kafka.server.{TestServer, TestServerConfig}
+import akka.persistence.kafka.{Event, EventDecoder, EventTopicMapper}
+import akka.persistence._
 import akka.serialization.SerializationExtension
-
 import com.typesafe.config.ConfigFactory
+import _root_.kafka.consumer.{Consumer, ConsumerConfig}
+import _root_.kafka.serializer.{DefaultDecoder, StringDecoder}
 
-import kafka.consumer.{Consumer, ConsumerConfig}
-import kafka.serializer.{DefaultDecoder, StringDecoder}
+import scala.collection.immutable.Seq
 
 class ExampleProcessor(val persistenceId: String) extends PersistentActor {
   import ExampleProcessor.Increment
@@ -28,8 +26,9 @@ class ExampleProcessor(val persistenceId: String) extends PersistentActor {
       println(s"snapshot saved (metadata = ${md})")
     case SaveSnapshotFailure(md, e) =>
       println(s"snapshot saving failed (metadata = ${md}, error = ${e.getMessage})")
-    case PersistenceFailure(payload, snr, e) =>
-      println(s"persistence failed (payload = ${payload}, sequenceNr = ${snr}, error = ${e.getMessage})")
+    // deprecated with akka 2.4, see http://doc.akka.io/docs/akka/2.4.2/project/migration-guide-2.3.x-2.4.x.html
+    //case PersistenceFailure(payload, snr, e) =>
+    //  println(s"persistence failed (payload = ${payload}, sequenceNr = ${snr}, error = ${e.getMessage})")
   }
 
   def receiveRecover: Receive = {
@@ -38,8 +37,9 @@ class ExampleProcessor(val persistenceId: String) extends PersistentActor {
     case SnapshotOffer(md, snapshot: Int) =>
       state = snapshot
       println(s"state initialized: ${state} (metadata = ${md})")
-    case RecoveryFailure(e) =>
-      println(s"recovery failed (error = ${e.getMessage})")
+    // deprecated with akka 2.4, see http://doc.akka.io/docs/akka/2.4.2/project/migration-guide-2.3.x-2.4.x.html
+    //case RecoveryFailure(e) =>
+    //  println(s"recovery failed (error = ${e.getMessage})")
   }
 
   def update(i: Increment): Unit = {
